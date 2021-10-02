@@ -1,0 +1,225 @@
+# ATTEMPT OF A TRADING ALGORITHM WITH MOVING AVERAGES:
+# - Number of stocks bought
+# - Possibility to set up a stop-loss
+# - Statistics about the results of Algorithm
+# - Visive Backtesting
+
+import pandas as pd
+import numpy as np
+from matplotlib import pyplot as plt
+import yfinance as yf
+import seaborn as sns
+import statsmodels.api as sm
+
+x = input ('insert Ticker: ')
+y = input ('insert range: ')
+zn = input('insert Capital: ')
+zn = int(zn)
+
+data = yf.Ticker(x).history(period=y)
+open1 = data['Open']
+data = data['Close']
+
+n = (zn/open1[0]).round(0)
+
+print ('Number of stocks bought: ', n)
+
+#-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+# Create Moving Averages, from 3 days to 120
+
+MA_3 = data.rolling(3, min_periods=1).mean()
+MA_5 = data.rolling(5, min_periods=1).mean()
+MA_10 = data.rolling(10, min_periods=1).mean()
+MA_15 = data.rolling(15, min_periods=1).mean()
+MA_30 = data.rolling(30, min_periods=1).mean()
+MA_60 = data.rolling(60, min_periods=1).mean()
+MA_120 = data.rolling(120, min_periods=1).mean()
+
+# Create the conditions to use the right Moving average, according to the number of observations
+
+if len(data)<= 30:      #Circa 6 settimane (1 mese e mezzo) per gli stocks, 1 mese per i tassi di cambio
+    plot = data.plot(figsize = (15, 10), label = 'Stock', color = ('red'), marker='h')
+    MA_3.plot(figsize = (15, 7), label = 'MA 3d')
+    plot.legend()
+    MA = pd.concat([data, MA_3],  axis = 1)
+
+elif len(data) <= 60:    #Circa 12 settimane (3 mesi) per gli stock, 2 mesi per i tassi di cambio
+    plot = data.plot(figsize = (15, 10),label = 'Stock', color = ('red'), marker='h')
+    MA_5.plot(figsize = (15, 7), label = 'MA 5d')
+    plot.legend()
+    MA = pd.concat([data, MA_5],  axis = 1)
+    print(MA)
+
+elif len(data) <= 100:      #Circa 20 settimane (5 mesi) per gli stock, 3 mesi e mezzo per i tassi di cambio
+    plot = data.plot(figsize = (15, 10),label = 'Stock', color = ('red'), marker='h')
+    MA_10.plot(figsize = (15, 7), label = 'MA 10d')
+    plot.legend()
+    MA = pd.concat([data, MA_10],  axis = 1)
+    
+elif len(data) <= 260:       #Circa 1 anno per gli stock, 8 mesi e mezzo per i tassi di cambio
+    plot = data.plot(figsize = (15, 10), label = 'Stock', color = ('red'))
+    MA_30.plot(figsize = (15, 7), label = 'MA 30d')
+    plot.legend()
+    MA = pd.concat([data, MA_30], axis = 1)
+
+elif len(data) <= 1000:       # Circa 4 anni per gli stock, 2 anni e 9 mesi per i tassi di cambio
+    plot = data.plot(figsize = (15, 10), label = 'Stock', color = ('red'))
+    MA_60.plot(figsize = (15, 7), label = 'MA 30d')
+    plot.legend()
+    MA = pd.concat([data, MA_60], axis = 1)
+    
+else:                       # più di 4 anni per gli stocks, più di 2 anni e 9 mesi per i tassi di cambio
+    plot = data.plot(figsize = (15, 10), label = 'Stock', color = ('red'))
+    MA_120.plot(figsize = (15, 7), label = 'MA 120d')
+    plot.legend()
+    MA = pd.concat([data, MA_120], axis = 1)
+    
+MA = MA.set_axis(["Close", "MA"], axis=1)
+
+#-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+# Create the 'sig' data set, containing all the data about prices, Moving averages, and difference between the two values
+
+sig = MA['Close']-MA['MA']
+sig = pd.DataFrame(sig,columns=['Signal'])
+
+cf = list ()
+
+# Create the procedure to buy, sell, hold, stay outside of the market
+
+for i in range (len (data)): 
+    if sig['Signal'][i] < 0 and sig['Signal'][i-1] > 0:
+        cf.append('SELL')  
+    if sig['Signal'][i] > 0 and sig['Signal'][i-1] < 0:
+        cf.append('BUY')    
+    if sig['Signal'][i] > 0 and sig['Signal'][i-1] > 0:
+        cf.append('HOLD')   
+    if sig['Signal'][i] < 0 and sig['Signal'][i-1] < 0:
+        cf.append('AWAY')  
+        
+# Create the final dataset
+
+data1 = data.drop(data.index[[0,1]])
+cf = pd.Series(cf)
+cf = pd.DataFrame(cf, columns = ['Cosa Fare?'])
+cf = cf.set_index(data1.index)
+
+final = pd.concat([sig['Signal'], open1, MA['Close'], MA['MA'], cf['Cosa Fare?']], axis=1).dropna()
+
+# Create the Stoploss
+
+sloss = input ('Stop-loss (% su primo prezzo di apertura): ')
+sloss = float(sloss)
+
+final.loc[final['Close'] < (open1[0]-open1[0]*(sloss/100)), 'Stoploss'] = 'SELL - STOPLOSS'
+final.loc[final['Close'] > (open1[0]-open1[0]*(sloss/100)), 'Stoploss'] = 'KEEP'
+
+#---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+# Income and result of Strategy
+
+final.loc[final['Cosa Fare?'] == 'SELL', 'Returns'] = n*open1
+final.loc[final['Cosa Fare?'] == 'BUY', 'Returns'] = n*(-open1)
+final.loc[final['Cosa Fare?'] == 'HOLD', 'Returns'] = n*(final['Close'].diff())
+final.loc[final['Cosa Fare?'] == 'AWAY', 'Returns'] = 0
+final.loc[final['Stoploss'] == 'SELL - STOPLOSS', 'Returns'] = 0
+
+# See the number of trades 
+
+tr1 = final['Cosa Fare?'][final['Cosa Fare?'] == 'SELL'].count()
+tr2 = final['Cosa Fare?'][final['Cosa Fare?'] == 'BUY'].count()
+tr_n = tr1 + tr2
+
+# See how many trades were successful, how many unsucessful
+
+sof = final.loc[(final['Cosa Fare?'] == 'SELL') | (final['Cosa Fare?'] == 'BUY')]
+sof1 = sof['Close'].diff()
+sof1 = pd.concat([sof, sof1], axis = 1)
+sof1 = sof1.set_axis(['Signal','Open','Close','MA','Cosa Fare?','Returns', 'Stoploss','Plus/minus'], axis = 1)
+
+success = sof1['Plus/minus'][sof1['Plus/minus']>0].count()
+unsuccess = sof1['Plus/minus'][sof1['Plus/minus']<0].count()
+
+ii = ['Total number of Trades', 'Successful Trades', 'Unsucessful Trades']
+post = pd.DataFrame([tr_n, success, unsuccess], index = ii, columns = ['Number'])
+print (post)
+
+# Compare the alredy created strategy with a buy-hold Startegy in the given period and range
+
+tot_ret = ((((final['Returns'].sum())-(final['Close'][0]))/(final['Close'][0]))*100)/n
+h = (data.pct_change()*100).sum().round(2)
+leg = ['Algoritmo', 'Strategia BUY - HOLD']
+p = ['Return (%)']
+c = pd.DataFrame(data = [tot_ret, h], index = leg, columns = p)
+print (c)
+
+# Save the data on Excel
+
+final.to_excel(r'C:\Users\39328\OneDrive\Desktop\Signal.xlsx')
+
+#---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+# Backtesting
+
+final.loc[final['Cosa Fare?'] == 'SELL', 'color'] = 'orange'
+final.loc[final['Cosa Fare?'] == 'BUY', 'color'] = 'lime'
+final.loc[final['Cosa Fare?'] == 'HOLD', 'color'] = 'navy'
+final.loc[final['Cosa Fare?'] == 'AWAY', 'color'] = 'forestgreen'
+final.loc[final['Stoploss'] == 'SELL - STOPLOSS', 'colorsl'] = 'black'
+final.loc[final['Stoploss'] == 'KEEP', 'colorsl'] = 'white'
+
+buy = final[final['Cosa Fare?'] == 'BUY']
+buy = buy[['Close','Cosa Fare?', 'Returns', 'color']]
+sell = final[final['Cosa Fare?'] == 'SELL']
+sell = sell[['Close','Cosa Fare?', 'Returns', 'color']]
+hold = final[final['Cosa Fare?'] == 'HOLD']
+hold = hold[['Close','Cosa Fare?', 'Returns', 'color']]
+away = final[final['Cosa Fare?'] == 'AWAY']
+away = away[['Close','Cosa Fare?', 'Returns', 'color']]
+sl = final[final['Stoploss'] == 'SELL - STOPLOSS']
+sl = sl[['Close','Cosa Fare?', 'Returns', 'colorsl']]
+
+sl1 = open1[0]-open1[0]*(sloss/100)
+
+plt.figure(figsize=(20,10))
+plot1 = plt.scatter(buy.index, buy['Close'], color = buy['color'], s = 80, label = 'BUY', marker = 'v')
+plot1 = plt.scatter(sell.index, sell['Close'], color = sell['color'], s = 80, label = 'SELL', marker = '^')
+plot1 = plt.scatter(hold.index, hold['Close'], color = hold['color'], s = 80, label = 'HOLD')
+plot1 = plt.scatter(away.index, away['Close'], color = away['color'], s = 80, label = 'AWAY')
+plot1 = plt.scatter(sl.index, sl['Close'], color = sl['colorsl'], s = 200, marker = 'x', label = 'STOP LOSS')
+plt.plot(final.index, final['MA'], c='blue', zorder=-1)
+plt.plot(final.index, final['Close'], c='red')
+plt.axhline(sl1, color = 'Purple', linestyle = 'dashed', label = 'STOP-LOSS line')
+plt.legend()
+plt.show()
+
+#----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+# IN ANOTHER CELL: Alternative Backtesting
+
+final.loc[final['Cosa Fare?'] == 'SELL', 'color'] = 'orange'
+final.loc[final['Cosa Fare?'] == 'BUY', 'color'] = 'lime'
+final.loc[final['Cosa Fare?'] == 'HOLD', 'color'] = 'navy'
+final.loc[final['Cosa Fare?'] == 'AWAY', 'color'] = 'forestgreen'
+
+buy = final[final['Cosa Fare?'] == 'BUY']
+buy = buy[['Close','Cosa Fare?', 'Returns', 'color']]
+sell = final[final['Cosa Fare?'] == 'SELL']
+sell = sell[['Close','Cosa Fare?', 'Returns', 'color']]
+hold = final[final['Cosa Fare?'] == 'HOLD']
+hold = hold[['Close','Cosa Fare?', 'Returns', 'color']]
+away = final[final['Cosa Fare?'] == 'AWAY']
+away = away[['Close','Cosa Fare?', 'Returns', 'color']]
+
+plt.figure(figsize=(15,8))
+plt.scatter(buy.index, buy['Close'], color = buy['color'], s = 50, label = 'BUY')
+plt.scatter(sell.index, sell['Close'], color = sell['color'], s = 50, label = 'SELL')
+plt.scatter(hold.index, hold['Close'], color = hold['color'], s = 50, label = 'HOLD')
+plt.scatter(away.index, away['Close'], color = away['color'], s = 50, label = 'AWAY')
+plt.plot(final['MA'], c='blue')
+plt.plot(final['Close'], c='red')
+plt.legend()
+plt.show()
+
+plt.savefig(r'C:\Users\39328\OneDrive\Desktop\Strategia.png', dpi = 400)
