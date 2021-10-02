@@ -1,0 +1,168 @@
+# Live Updating time series with relative MA, and Volume Bar graph 
+
+import yfinance as yf
+import pandas as pd
+import numpy as np
+import plotly.express as px
+import plotly.graph_objects as go
+from jupyter_dash import JupyterDash
+import dash_core_components as dcc
+import dash_html_components as html
+from dash.dependencies import Input, Output
+
+a = input('Scegli Titolo: ')
+
+# define the data set, save it in .csv
+
+data = yf.download(tickers=a, period='1d', interval='1m',auto_adjust=True)
+data = data['Close']
+
+data.index = data.index.tz_localize(None)
+
+MA_3 = data.rolling(3, min_periods=1).mean()
+MA_5 = data.rolling(5, min_periods=1).mean()
+MA_10 = data.rolling(10, min_periods=1).mean()
+MA_15 = data.rolling(15, min_periods=1).mean()
+MA_30 = data.rolling(30, min_periods=1).mean()
+MA_60 = data.rolling(60, min_periods=1).mean()
+MA_120 = data.rolling(120, min_periods=1).mean()
+MA_250 = data.rolling(250, min_periods=1).mean()
+MA_500 = data.rolling(500, min_periods=1).mean()
+
+
+if len(data)<= 30:      
+    MA = pd.concat([data, MA_3],  axis = 1)
+
+elif len(data) <= 60:    
+    MA = pd.concat([data, MA_5],  axis = 1)
+
+elif len(data) <= 100:      
+    MA = pd.concat([data, MA_10],  axis = 1)
+    
+elif len(data) <= 260:       
+    MA = pd.concat([data, MA_30], axis = 1)
+
+elif len(data) <= 1000:      
+    MA = pd.concat([data, MA_60], axis = 1)
+    
+else:                   
+    MA = pd.concat([data, MA_120], axis = 1)
+    
+MA = MA.set_axis(["Close", "MA"], axis=1)
+    
+data1 = yf.download(tickers=a, period='1d', interval='1m',auto_adjust=True)
+data1 = data1['Volume']
+data.to_csv(r'C:\Users\39328\OneDrive\Desktop\Dash Dataset')
+data1.to_csv(r'C:\Users\39328\OneDrive\Desktop\Dash Dataset1')
+
+# Import the font, define the app
+
+external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
+
+app = JupyterDash(__name__, external_stylesheets=external_stylesheets)
+
+colors = { 'background': 'white', 
+         'text': 'black'}
+
+# Represent the graphs, using Plotly 
+
+fig = data.plot(template = 'plotly_dark')
+fig1 = px.bar(data1, x=data1.index, y=data1)
+
+# Define the Layout
+
+app.layout = html.Div([
+    html.H1("LU Time Series"),
+            dcc.Interval(
+            id='interval-component',
+            interval=1*10000, # in milliseconds
+            n_intervals=0
+        ),
+    dcc.Graph(id='graph', animate=True),
+    dcc.Graph(id='graph1', animate=True),
+])
+
+# We want the graph to be live-Updating, so we need to define the callbacks
+
+@app.callback(
+    Output('graph', 'figure'),
+    [Input('interval-component', "n_intervals")]
+)
+def streamFig(value):
+    
+    global MA
+    
+    Y = yf.download(tickers=a, period='1d', interval='1m',auto_adjust=True)
+    Y = Y['Close']
+    
+    MA_3 = Y.rolling(3, min_periods=1).mean()
+    MA_5 = Y.rolling(5, min_periods=1).mean()
+    MA_10 = Y.rolling(10, min_periods=1).mean()
+    MA_15 = Y.rolling(15, min_periods=1).mean()
+    MA_30 = Y.rolling(30, min_periods=1).mean()
+    MA_60 = Y.rolling(60, min_periods=1).mean()
+    MA_120 = Y.rolling(120, min_periods=1).mean()
+    MA_250 = Y.rolling(250, min_periods=1).mean()
+    MA_500 = Y.rolling(500, min_periods=1).mean()
+    
+    
+    if len(Y)<= 30:      
+        MA1 = pd.concat([Y, MA_3],  axis = 1)
+
+    elif len(Y) <= 60:    
+        MA1 = pd.concat([Y, MA_5],  axis = 1)
+
+    elif len(Y) <= 100:      
+        MA1 = pd.concat([Y, MA_10],  axis = 1)
+    
+    elif len(Y) <= 260:       
+        MA1 = pd.concat([Y, MA_30], axis = 1)
+
+    elif len(Y) <= 1000:      
+        MA1 = pd.concat([Y, MA_60], axis = 1)
+    
+    else:                   
+        MA1 = pd.concat([Y, MA_120], axis = 1)
+    
+    MA1 = MA1.set_axis(["Close", "MA"], axis=1)
+
+    MA = MA.append(MA1.tail(1))
+    MA3 = MA.copy()
+    MA3 = MA[1:]
+    fig = MA3.plot(template = 'plotly_dark')
+    fig.update_traces(mode='markers+lines')
+
+    
+    fig.update_layout(
+    plot_bgcolor=colors['background'],
+    paper_bgcolor=colors['background'],
+    font_color=colors['text'])
+
+    return(fig)
+
+@app.callback(
+    Output('graph1', 'figure'),
+    [Input('interval-component', "n_intervals")]
+)
+def streamFig1(value):
+    
+    global data1
+    
+    Y1 = yf.download(tickers=a, period='1d', interval='1m',auto_adjust=True)
+    Y1 = Y1['Volume']
+    data1 = data1.append(Y1.tail(1))
+    data4 = data1.copy()
+    data4 = data1[1:]
+    fig1 = px.bar(data4, x=data4.index, y=data4)
+    
+    fig1.update_layout(
+    plot_bgcolor=colors['background'],
+    paper_bgcolor=colors['background'],
+    font_color=colors['text'])
+
+    return(fig1)
+
+# Start the app in HTML Mode
+
+app.run_server(port = 8020, dev_tools_ui=True, #debug=True,
+              dev_tools_hot_reload =True, threaded=True)
